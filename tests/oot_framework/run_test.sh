@@ -1182,6 +1182,9 @@ if '_cls_${cls}' in globals():
 import sys as _sys, os as _os
 _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
 
+# Loads the generated __oot_conftest_${original_stem}.py as a plugin -- it isn't named conftest.py, so pytest won't auto-discover it here (outside any repo's tree).
+pytest_plugins = ["__oot_conftest_${original_stem}"]
+
 # Ensure the spyre tests directory is on sys.path before any torch imports.
 # torch.testing._internal.common_device_type uses runpy to load
 # TORCH_TEST_DEVICES (oot_test_base_common.py), which imports spyre_*
@@ -1255,6 +1258,13 @@ def _do_pre_import():
             _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '${module_name}.py'),
         )
         _pre_mod = _ilu.module_from_spec(_private_spec)
+        # Register before exec so the synthetic name is importable for as long as
+        # the captured classes live. Their functions keep _pre_mod's dict as
+        # __globals__, and anything that resolves a global through the module name
+        # -- torch.compile, pickle, dataclasses, typing.get_type_hints -- does
+        # importlib.import_module(__globals__['__name__']) and fails on an
+        # unregistered module.
+        _sys.modules[_private_spec.name] = _pre_mod
         _private_spec.loader.exec_module(_pre_mod)
     finally:
         _cdtype.instantiate_device_type_tests = real_fn
@@ -1404,6 +1414,21 @@ import torch.testing._internal.common_utils as _cu
 _dl = getattr(_cu, 'DEVICE_LIST_SUPPORT_PROFILING_TEST', None)
 if _dl is not None and 'privateuse1' not in _dl:
     _cu.DEVICE_LIST_SUPPORT_PROFILING_TEST = list(_dl) + ['privateuse1']
+
+import os
+
+# pytest's own summary only shows the xfail marker's static reason, hiding the actual error -- print it too.
+def _xfail_failure_message(report):
+    longrepr = report.longrepr
+    reprcrash = getattr(longrepr, "reprcrash", None)
+    message = reprcrash.message if reprcrash is not None else str(longrepr)
+    message = " ".join(message.split())
+    return message[:300] + "..." if len(message) > 300 else message
+
+
+def pytest_runtest_logreport(report):
+    if report.when == "call" and report.skipped and getattr(report, "wasxfail", None) is not None:
+        os.write(1, f"  [XFAIL ERROR = {_xfail_failure_message(report)}]\n".encode())
 CONFTEST_EOF
 
     WRAPPER_FILES+=("$wrapper_path" "$conftest_path")
@@ -2197,11 +2222,26 @@ _run_parallel_across_cards() {
             set +euo pipefail
             export SPYRE_TEST_FILE="$_rf"
             export OOT_TEST_FILE="$_rf"
+            # Tells torch_spyre to skip real device init on torch.manual_seed()
+            # (a common module/class-body idiom in any PyTorch test file,
+            # upstream ones included) -- otherwise it lazy-inits the Spyre
+            # runtime here, with no SPYRE_DEVICES set to say which physical
+            # card to open, and start_runtime() fails looking for a PCIe
+            # address in /dev/vfio. See torch_spyre/__init__.py's
+            # _OOT_COLLECT_ONLY.
+            export OOT_COLLECT_ONLY=1
             # Give this probe its own Inductor cache dir so concurrent collect-only imports can't race on the same shutil.rmtree() target (see the identical fix for the per-card execution subshells below).
             _probe_base_cache="${TORCHINDUCTOR_CACHE_DIR:-/tmp/torchinductor_${USER:-$(id -un)}}"
-            # Bucketed by the same concurrency bound as the probe throttle, not by file, so the directory count stays fixed instead of growing with the file list.
-            _probe_slot=$(( i % _n_cards ))
-            export TORCHINDUCTOR_CACHE_DIR="${_probe_base_cache}__collect_slot${_probe_slot}"
+            # Keyed by file index i (unique per file), not by slot (i % _n_cards).
+            # A slot-keyed dir is reused by the next probe scheduled into that
+            # slot as soon as the concurrency throttle admits it, racing that
+            # probe's cache import against the previous occupant's teardown
+            # rmtree() of the same directory -- Inductor-heavy files (e.g. the
+            # upstream_tests_beta inductor-* suites, which do real compilation
+            # work during collection) hit this often enough at _n_cards >= 2
+            # to come back with zero collected IDs. Matches the retry probe
+            # below, which already keys its own cache dir by file index.
+            export TORCHINDUCTOR_CACHE_DIR="${_probe_base_cache}__collect_${i}"
             cd "$_rd" && python3 -m pytest "$_rb" \
                 "${_collect_args[@]+"${_collect_args[@]}"}" \
                 --collect-only -q --no-header 2>"$_cerr" \
@@ -2249,6 +2289,8 @@ _run_parallel_across_cards() {
                     set +euo pipefail
                     export SPYRE_TEST_FILE="$_rf2"
                     export OOT_TEST_FILE="$_rf2"
+                    # Same reason as the main probe above -- see _OOT_COLLECT_ONLY in torch_spyre/__init__.py.
+                    export OOT_COLLECT_ONLY=1
                     # A dedicated cache dir for the retry too, so it can't collide with whatever else is still running.
                     export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-/tmp/torchinductor_${USER:-$(id -un)}}__retry_${i}"
                     cd "$(dirname "$_rf2")" && python3 -m pytest "$(basename "$_rf2")" \
