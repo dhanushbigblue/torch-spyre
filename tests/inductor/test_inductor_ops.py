@@ -780,6 +780,15 @@ def _build_fp32_proxy_cpu_refs(
 
 
 class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
+    # PARAMS below is built from cached_randn()/cached_xavier(), both of which
+    # seed their own torch.Generator per call (see utils_inductor.py) and
+    # ignore the default/global generator, so no seeding is needed here --
+    # setUp() below reseeds for whatever each test body does with the global
+    # generator at run time. A bare torch.manual_seed(0xAFFE) at class-body
+    # scope used to sit here; removed because it seeds every registered
+    # device (including Spyre), triggering Spyre's _lazy_init() at
+    # class-definition time, i.e. during pytest --collect-only.
+    
     def setUp(self):
         super().setUp()
         torch.manual_seed(0xAFFE)
