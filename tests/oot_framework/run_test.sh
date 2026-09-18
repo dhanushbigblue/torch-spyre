@@ -2274,7 +2274,12 @@ _run_parallel_across_cards() {
         if [[ -z "$_raw_ids" && ! -s "$_cerr" ]]; then
             local _pexit=""
             [[ -f "$_cexit" ]] && _pexit="$(< "$_cexit")"
-            [[ "$_pexit" =~ ^[0-9]+$ && ( "$_pexit" -ge 128 || "$_pexit" -eq 2 ) ]] && _retry_idx+=("$i")
+            if [[ "$_pexit" =~ ^[0-9]+$ && ( "$_pexit" -ge 128 || "$_pexit" -eq 2 ) ]]; then
+                _retry_idx+=("$i")
+                # Keep _collect_exit_files[$i] pointing at the triggering exit file
+                # so the retry log message can report the exact exit code.
+                _collect_exit_files[$i]="$_cexit"
+            fi
         fi
     done
 
@@ -2292,18 +2297,25 @@ _run_parallel_across_cards() {
     # a silent no-op.
     declare -A _retry_out_files=()
     declare -A _retry_err_files=()
+    declare -A _retry_exit_files=()
     while [[ ${#_retry_idx[@]} -gt 0 && $_retry_round -lt $_MAX_RETRY_ROUNDS ]]; do
         _retry_round=$(( _retry_round + 1 ))
         _retry_out_files=()
         _retry_err_files=()
+        _retry_exit_files=()
         local -a _retry_pids=()
         for i in "${_retry_idx[@]}"; do
-            echo "[torch_oot_device_tests_run_serial]   $(basename "${TEST_FILES[$i]}") collect-only was signal-killed or interrupted -- retrying (round ${_retry_round})." >&2
+            local _pexit_prev=""
+            local _cexit_prev="${_collect_exit_files[$i]}"
+            [[ -f "$_cexit_prev" ]] && _pexit_prev="$(< "$_cexit_prev")"
+            echo "[torch_oot_device_tests_run_serial]   $(basename "${TEST_FILES[$i]}") collect-only was signal-killed or interrupted (exit ${_pexit_prev:-unknown}) -- retrying (round ${_retry_round})." >&2
             local _rf2="${RUN_FILES[$i]}"
             local _rout="/tmp/_spyre_collect_retry_ids_${$}_${i}.tmp"
             local _rerr="/tmp/_spyre_collect_retry_err_${$}_${i}.tmp"
+            local _rexit="/tmp/_spyre_collect_retry_exit_${$}_${i}.tmp"
             _retry_out_files[$i]="$_rout"
             _retry_err_files[$i]="$_rerr"
+            _retry_exit_files[$i]="$_rexit"
             (
                 set +euo pipefail
                 export SPYRE_TEST_FILE="$_rf2"
@@ -2314,6 +2326,7 @@ _run_parallel_across_cards() {
                     "${_collect_args[@]+"${_collect_args[@]}"}" \
                     --collect-only -q --no-header 2>"$_rerr" \
                 | grep '\.py::' > "$_rout"
+                echo "${PIPESTATUS[0]}" > "$_rexit"
             ) &
             _retry_pids+=($!)
             while [[ "$(jobs -rp | wc -l)" -ge "$_n_cards" ]]; do
@@ -2330,19 +2343,26 @@ _run_parallel_across_cards() {
         for i in "${_retry_idx[@]}"; do
             local _rout="${_retry_out_files[$i]}"
             local _rerr="${_retry_err_files[$i]}"
+            local _rexit="${_retry_exit_files[$i]}"
             local _raw_ids=""
             [[ -f "$_rout" ]] && _raw_ids="$(< "$_rout")"
             rm -f "$_rout"
             if [[ -n "$_raw_ids" ]]; then
                 echo "[torch_oot_device_tests_run_serial]   retry succeeded for $(basename "${TEST_FILES[$i]}") (round ${_retry_round})." >&2
                 _raw_ids_map[$i]="$_raw_ids"
-                rm -f "$_rerr"
+                rm -f "$_rerr" "$_rexit"
             elif [[ -s "$_rerr" ]]; then
                 # The retry's own stderr is more relevant than the original (empty) one if it failed for a different reason.
                 _err_file_map[$i]="$_rerr"
+                # Update to this round's exit code so the finalize block reflects the last attempt, not round 0.
+                rm -f "${_collect_exit_files[$i]}"
+                _collect_exit_files[$i]="$_rexit"
             else
+                # Still failing: carry over, updating exit code to this round's value.
                 _next_retry_idx+=("$i")
                 rm -f "$_rerr"
+                rm -f "${_collect_exit_files[$i]}"
+                _collect_exit_files[$i]="$_rexit"
             fi
         done
         _retry_idx=("${_next_retry_idx[@]+"${_next_retry_idx[@]}"}")
