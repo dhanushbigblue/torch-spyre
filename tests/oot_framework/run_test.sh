@@ -2285,10 +2285,17 @@ _run_parallel_across_cards() {
     # it succeeds or reports a real error), so later rounds cost less than the first, not more.
     local _MAX_RETRY_ROUNDS=3
     local _retry_round=0
+    # Declared once outside the loop; reset with plain =() each round inside.
+    # declare -A inside a loop re-initialises (wipes) the array on every iteration
+    # because declare is function-scoped in bash -- the fold loop would always read
+    # empty paths from round N+1 onwards, making every retry round after the first
+    # a silent no-op.
+    declare -A _retry_out_files=()
+    declare -A _retry_err_files=()
     while [[ ${#_retry_idx[@]} -gt 0 && $_retry_round -lt $_MAX_RETRY_ROUNDS ]]; do
         _retry_round=$(( _retry_round + 1 ))
-        declare -A _retry_out_files=()
-        declare -A _retry_err_files=()
+        _retry_out_files=()
+        _retry_err_files=()
         local -a _retry_pids=()
         for i in "${_retry_idx[@]}"; do
             echo "[torch_oot_device_tests_run_serial]   $(basename "${TEST_FILES[$i]}") collect-only was signal-killed or interrupted -- retrying (round ${_retry_round})." >&2
