@@ -2288,7 +2288,7 @@ _run_parallel_across_cards() {
     # one-at-a-time retry path: every round, including the last, launches its whole candidate
     # set at once. The candidate set only shrinks between rounds (a file drops out as soon as
     # it succeeds or reports a real error), so later rounds cost less than the first, not more.
-    local _MAX_RETRY_ROUNDS=3
+    local _MAX_RETRY_ROUNDS=5
     local _retry_round=0
     # Declared once outside the loop; reset with plain =() each round inside.
     # declare -A inside a loop re-initialises (wipes) the array on every iteration
