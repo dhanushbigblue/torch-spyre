@@ -2283,11 +2283,14 @@ _run_parallel_across_cards() {
         fi
     done
 
-    # Retry every still-failing candidate concurrently (bounded to _n_cards, same throttle as
-    # the primary probes above), for up to _MAX_RETRY_ROUNDS rounds -- there is no serial,
-    # one-at-a-time retry path: every round, including the last, launches its whole candidate
-    # set at once. The candidate set only shrinks between rounds (a file drops out as soon as
-    # it succeeds or reports a real error), so later rounds cost less than the first, not more.
+    # Retry every still-failing candidate concurrently (with progressively lower concurrency
+    # to reduce memory/import pressure after the first failure), for up to _MAX_RETRY_ROUNDS
+    # rounds.  Worker limit per round:
+    #   round 1  -> _n_cards  (full concurrency; preserves throughput on the first retry)
+    #   round 2  -> ceil(_n_cards / 2)  (half slots)
+    #   round 3+ -> 1  (serial; maximally safe for repeated signal-kill candidates)
+    # The candidate set only shrinks between rounds (a file drops out as soon as it succeeds
+    # or reports a real error), so later rounds cost less than the first, not more.
     local _MAX_RETRY_ROUNDS=5
     local _retry_round=0
     # Declared once outside the loop; reset with plain =() each round inside.
@@ -2300,6 +2303,16 @@ _run_parallel_across_cards() {
     declare -A _retry_exit_files=()
     while [[ ${#_retry_idx[@]} -gt 0 && $_retry_round -lt $_MAX_RETRY_ROUNDS ]]; do
         _retry_round=$(( _retry_round + 1 ))
+        # Derive per-round worker limit: full -> half -> serial.
+        local _retry_workers
+        if   [[ $_retry_round -eq 1 ]]; then
+            _retry_workers=$_n_cards
+        elif [[ $_retry_round -eq 2 ]]; then
+            _retry_workers=$(( (_n_cards + 1) / 2 ))
+        else
+            _retry_workers=1
+        fi
+        echo "[torch_oot_device_tests_run_parallel]   retry round ${_retry_round}/${_MAX_RETRY_ROUNDS}: ${#_retry_idx[@]} candidate(s), workers=${_retry_workers}" >&2
         _retry_out_files=()
         _retry_err_files=()
         _retry_exit_files=()
@@ -2329,7 +2342,7 @@ _run_parallel_across_cards() {
                 echo "${PIPESTATUS[0]}" > "$_rexit"
             ) &
             _retry_pids+=($!)
-            while [[ "$(jobs -rp | wc -l)" -ge "$_n_cards" ]]; do
+            while [[ "$(jobs -rp | wc -l)" -ge "$_retry_workers" ]]; do
                 wait -n 2>/dev/null || true
             done
         done
