@@ -307,7 +307,7 @@ def main() -> None:
 
     results = []
     skipped_covered = 0
-    skipped_platform = 0
+    skipped_platform = []
     for cfg in sorted(config_dir.rglob("*.yaml")):
         try:
             labels = _load_labels(cfg)
@@ -321,7 +321,7 @@ def main() -> None:
             skipped_covered += 1
             continue
         if _excluded_on_this_platform(excluded_platforms):
-            skipped_platform += 1
+            skipped_platform.append(cfg.name)
             continue
         rel = str(cfg.relative_to(config_dir))
         results.append(
@@ -343,8 +343,9 @@ def main() -> None:
 
     if skipped_platform:
         print(
-            f"platform: skipped {skipped_platform} config(s) excluded on "
-            f"{platform.machine()!r} (test_suite_config.exclude_platforms)",
+            f"platform: skipped {len(skipped_platform)} config(s) excluded on "
+            f"{platform.machine()!r} (test_suite_config.exclude_platforms): "
+            f"{', '.join(skipped_platform)}",
             file=sys.stderr,
         )
 
