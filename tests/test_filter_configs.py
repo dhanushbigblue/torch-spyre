@@ -12,13 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""tests/oot_framework/utils/filter_configs.py: label/platform selection logic."""
+"""tests/oot_framework/utils/filter_configs.py: label selection logic."""
 
 import importlib.util
-import platform
 from pathlib import Path
 
-import pytest
 import yaml
 
 HELPER = (
@@ -30,36 +28,20 @@ filter_configs = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(filter_configs)
 
 
-def _write_config(tmp_path, *, labels=None, exclude_platforms=None):
+def _write_config(tmp_path, *, labels=None):
     cfg = {"test_suite_config": {}}
     if labels is not None:
         cfg["test_suite_config"]["labels"] = labels
-    if exclude_platforms is not None:
-        cfg["test_suite_config"]["exclude_platforms"] = exclude_platforms
     path = tmp_path / "config.yaml"
     path.write_text(yaml.dump(cfg))
     return path
 
 
-def test_load_tsc_dedup(tmp_path):
-    path = _write_config(tmp_path, labels=["trunk"], exclude_platforms=["ppc64le"])
-    tsc = filter_configs._load_tsc(path)
-    assert filter_configs._load_labels(tsc) == ["trunk"]
-    assert filter_configs._load_excluded_platforms(tsc) == ["ppc64le"]
+def test_load_labels(tmp_path):
+    path = _write_config(tmp_path, labels=["trunk"])
+    assert filter_configs._load_labels(path) == ["trunk"]
 
 
-@pytest.mark.parametrize(
-    "exclude_platforms,machine,expected",
-    [
-        (["ppc64le"], "ppc64le", True),  # dropped: current arch is excluded
-        (["ppc64le"], "x86_64", False),  # kept: current arch isn't excluded
-        (None, "ppc64le", False),  # kept: no exclude_platforms set at all
-    ],
-)
-def test_excluded_on_this_platform(
-    tmp_path, monkeypatch, exclude_platforms, machine, expected
-):
-    monkeypatch.setattr(platform, "machine", lambda: machine)
-    path = _write_config(tmp_path, exclude_platforms=exclude_platforms)
-    excluded = filter_configs._load_excluded_platforms(filter_configs._load_tsc(path))
-    assert filter_configs._excluded_on_this_platform(excluded) is expected
+def test_load_labels_absent(tmp_path):
+    path = _write_config(tmp_path)
+    assert filter_configs._load_labels(path) == []

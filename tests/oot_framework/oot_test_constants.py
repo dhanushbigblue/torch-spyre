@@ -5,14 +5,19 @@ Constants for the OOT PyTorch test framework.
 All string literals, default values, and dtype maps are here.
 """
 
-from typing import Dict, Set
 
 import torch
 
-
 DEFAULT_FLOATING_PRECISION: float = 1e-3
 
-_DYNAMIC_TAG_PREFIXES = ("op__", "dtype__", "module__", "platform__", "testtype__")
+_DYNAMIC_TAG_PREFIXES = (
+    "op__",
+    "dtype__",
+    "exclude__plat_",
+    "module__",
+    "platform__",
+    "testtype__",
+)
 
 MODE_MANDATORY_SUCCESS = "mandatory_success"
 MODE_XFAIL = "xfail"
@@ -81,7 +86,7 @@ _VALID_TEST_MODES = {MODE_MANDATORY_SUCCESS, MODE_XFAIL, MODE_XFAIL_STRICT, MODE
 # Dtype defaults
 # --------------------
 
-DEFAULT_UNSUPPORTED_DTYPES: Set[torch.dtype] = {
+DEFAULT_UNSUPPORTED_DTYPES: set[torch.dtype] = {
     torch.complex32,
     torch.complex64,
     torch.complex128,
@@ -92,7 +97,7 @@ DEFAULT_UNSUPPORTED_DTYPES: Set[torch.dtype] = {
 # Ordered longest-first so "complex128" is matched before "complex12", etc.
 # ---------------------------------------------------------------------------
 
-DTYPE_STR_MAP: Dict[str, torch.dtype] = {
+DTYPE_STR_MAP: dict[str, torch.dtype] = {
     "float16": torch.float16,
     "float32": torch.float32,
     "float64": torch.float64,

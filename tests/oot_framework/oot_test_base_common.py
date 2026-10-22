@@ -4,16 +4,28 @@ Shared class and methods for all OOT PyTorch test overrides.
 
 """
 
-import os
 import json
+import os
 import unittest
-from functools import wraps
-from typing import Dict, List, Optional, Set, Tuple
 import warnings
+from functools import wraps
+from typing import Optional
 
 import pytest  # type: ignore
 import torch
 
+from oot_framework.oot_test_common_methods_invocations import (
+    _make_named_module_info_cls,
+    create_module_inputs_func_from_config,
+    create_module_inputs_func_from_yaml,
+)
+from oot_framework.oot_test_config_models import (
+    OOTTestConfig,
+    Precision,
+    SupportedModuleConfig,
+    SupportedOpConfig,
+    TestEntry,
+)
 from oot_framework.oot_test_constants import (
     _DYNAMIC_TAG_PREFIXES,
     DEFAULT_FLOATING_PRECISION,
@@ -35,21 +47,31 @@ from oot_framework.oot_test_parsing import (
     load_yaml_config,
     resolve_current_file,
 )
-
+from oot_framework.oot_test_utilities import (
+    _OOT_PLATFORM_ARCH,
+    _build_test_entry_map,
+    _extract_op_name_from_method,
+    _get_privateuse1_device_type,
+    _log_error,
+    _log_warning,
+    _regex_entries_for_name,
+    _select_entry_by_op_index,
+    _select_entry_for_variant,
+)
 from oot_framework.oot_upstream_patcher import (
+    _OOTCpuMovePatcher,
     _OOTDtypePatcher,
+    _OOTModuleDtypePatcher,
+    _OOTModuleListPatcher,
     _OOTModuleMarkerPatcher,
+    _OOTNativeDeviceTypesPatcher,
+    _OOTNoGradPatcher,
     _OOTOnlyOnPatcher,
     _OOTOpDtypeExpander,
     _OOTOpListPatcher,
-    _OOTModuleListPatcher,
-    _OOTModuleDtypePatcher,
     _OOTOpMarkerPatcher,
-    _OOTPrecisionOverridePatcher,
-    _OOTNativeDeviceTypesPatcher,
-    _OOTCpuMovePatcher,
-    _OOTNoGradPatcher,
     _OOTPlatformMarkerPatcher,
+    _OOTPrecisionOverridePatcher,
     _OOTTestTypeMarkerPatcher,
 )
 from oot_framework.oot_test_config_models import (
@@ -69,13 +91,11 @@ from oot_framework.oot_test_utilities import (
     _get_privateuse1_device_type,
     _log_warning,
     _log_error,
-    _platform_tags,
     _regex_entries_for_name,
     _build_test_entry_map,
     _select_entry_by_op_index,
     _select_entry_for_variant,
     _extract_op_name_from_method,
-    _OOT_PLATFORM_ARCH,
 )
 
 warnings.filterwarnings("ignore", category=pytest.PytestUnknownMarkWarning)
@@ -135,37 +155,30 @@ class OOTTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa: F
     # Exact-name lookup map: {base_method_name -> [TestEntry, ...]}
     # Multiple entries per name arise when two configs target the same test
     # with different tags/dtypes (e.g. same op tested for two different models).
-    TEST_ENTRIES: Dict[str, List["TestEntry"]] = {}
+    TEST_ENTRIES: dict[str, list["TestEntry"]] = {}
 
     # Regex-pattern store: [(regex_pattern, TestEntry), ...]
     # Populated alongside TEST_ENTRIES from YAML names that contain * ? [ ].
     # Matched against concrete method names in instantiate_test().
-    REGEX_ENTRIES: List[Tuple[str, "TestEntry"]] = []
+    REGEX_ENTRIES: list[tuple[str, "TestEntry"]] = []
 
     UNLISTED_TEST_MODE: str = UNLISTED_MODE_XFAIL  # file-level default
-    SUPPORTED_OPS_CONFIG: Dict[str, "SupportedOpConfig"] = {}  # {op_name -> config}
-    SUPPORTED_MODULES_CONFIG: Dict[
+    SUPPORTED_OPS_CONFIG: dict[str, "SupportedOpConfig"] = {}  # {op_name -> config}
+    SUPPORTED_MODULES_CONFIG: dict[
         str, "SupportedModuleConfig"
     ] = {}  # {module_name -> config}
-    GLOBAL_SUPPORTED_DTYPES: Optional[Set[torch.dtype]] = None  # None = no filtering
-    GLOBAL_DTYPE_PRECISION: Dict[torch.dtype, "Precision"] = {}
-    GLOBAL_DTYPE_FORCE_XFAIL: Set[torch.dtype] = set()
+    GLOBAL_SUPPORTED_DTYPES: set[torch.dtype] | None = None  # None = no filtering
+    GLOBAL_DTYPE_PRECISION: dict[torch.dtype, "Precision"] = {}
+    GLOBAL_DTYPE_FORCE_XFAIL: set[torch.dtype] = set()
 
     # test_suite_config.labels from the YAML, e.g. ["unit", "regression", "trunk"].
     # Drives the testtype__<label> pytest markers (see _OOTTestTypeMarkerPatcher).
-    TEST_SUITE_LABELS: List[str] = []
-
-    # test_suite_config.exclude_platforms from the YAML, lower-cased.
-    # _should_run() skips the whole file when the current arch matches.
-    # Evaluated here (on the actual test-execution machine) rather than only
-    # in filter_configs.py, which runs during CI matrix generation on an
-    # x86_64 runner and so never sees a non-x86_64 arch to exclude.
-    TEST_SUITE_EXCLUDED_PLATFORMS: List[str] = []
+    TEST_SUITE_LABELS: list[str] = []
 
     # File-level module filtering (populated during config load)
     # Use None as sentinel to indicate not yet initialized, avoiding shared mutable default
-    _FILE_LEVEL_INCLUDED_MODULES: Optional[Set[str]] = None
-    _FILE_LEVEL_EXCLUDED_MODULES: Optional[Set[str]] = None
+    _FILE_LEVEL_INCLUDED_MODULES: set[str] | None = None
+    _FILE_LEVEL_EXCLUDED_MODULES: set[str] | None = None
 
     @classmethod
     def get_all_devices(cls):
@@ -241,12 +254,6 @@ class OOTTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa: F
             file_entry.labels or config.test_suite_config.labels
         )
 
-        # Same file_entry-wins-else-suite-level fallback as TEST_SUITE_LABELS.
-        excluded_platforms = (
-            file_entry.exclude_platforms or config.test_suite_config.exclude_platforms
-        )
-        cls.TEST_SUITE_EXCLUDED_PLATFORMS = [str(p).lower() for p in excluded_platforms]
-
         # Build the exact-name lookup map and the regex-pattern list.
         # Regex patterns (names containing regex metacharacters) go into
         # REGEX_ENTRIES; everything else goes into TEST_ENTRIES keyed by
@@ -274,7 +281,7 @@ class OOTTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa: F
         cls._yaml_loaded = True
 
     @classmethod
-    def _register_custom_modules_from_edits(cls, modules_named_items: List) -> None:
+    def _register_custom_modules_from_edits(cls, modules_named_items: list) -> None:
         """Register custom modules from edits.modules.include into module_db.
 
         This allows tests to use modules that aren't in PyTorch's upstream module_db
@@ -282,7 +289,7 @@ class OOTTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa: F
         """
 
         try:
-            from torch.testing._internal.common_modules import module_db, ModuleInfo
+            from torch.testing._internal.common_modules import ModuleInfo, module_db
         except ImportError as e:
             _log_warning(
                 f"Cannot register custom modules: torch.testing._internal.common_modules "
@@ -378,7 +385,7 @@ class OOTTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa: F
 
     @classmethod
     def _register_module_input_generators(
-        cls, module_configs: Dict[str, SupportedModuleConfig]
+        cls, module_configs: dict[str, SupportedModuleConfig]
     ) -> None:
         """Register module input generators for modules with inline input specs.
 
@@ -431,8 +438,14 @@ class OOTTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa: F
 
         Returns (enabled: bool, reason: Optional[str], xfail: bool, strict: bool)
         """
-        # Suite-wide platform exclusion, independent of the resolved entry.
-        if _OOT_PLATFORM_ARCH.lower() in cls.TEST_SUITE_EXCLUDED_PLATFORMS:
+        # Per-entry platform exclusion via exclude__plat_<arch> tag.
+        # Works in Jenkins, direct run_test.sh invocations, and merged runs.
+        # filter_configs.py also handles whole-config exclusion and runs on
+        # non-x86 machines (e.g. ppc64le via make tests-single-card).
+        if (
+            entry is not None
+            and f"exclude__plat_{_OOT_PLATFORM_ARCH.lower()}" in entry.tags
+        ):
             return False, f"Excluded on platform {_OOT_PLATFORM_ARCH!r}", False, False
 
         # If entry was not pre-resolved by the caller, fall back to the old
@@ -546,12 +559,12 @@ class OOTTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa: F
             return True, None, False, False  # run, must pass
 
     @classmethod
-    def _get_supported_ops(cls) -> Optional[Set[str]]:
+    def _get_supported_ops(cls) -> set[str] | None:
         """Return the set of supported op names, or None if no filtering is configured."""
         return getattr(cls, "_supported_ops", None)
 
     @classmethod
-    def _get_supported_modules(cls) -> Optional[Set[str]]:
+    def _get_supported_modules(cls) -> set[str] | None:
         """Return the set of supported modules names, or None if no filtering is configured."""
         return getattr(cls, "_supported_modules", None)
 
@@ -578,7 +591,7 @@ class OOTTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa: F
         # When both sources return entries the exact-name entries come first,
         # preserving the original priority ordering.
         # ------------------------------------------------------------------
-        all_entries_for_name: List[TestEntry] = list(cls.TEST_ENTRIES.get(name, []))
+        all_entries_for_name: list[TestEntry] = list(cls.TEST_ENTRIES.get(name, []))
 
         # Regex-pattern lookup: extend with any entries whose pattern matches
         # the current base test name.  Skip entries already in the exact list
@@ -593,7 +606,7 @@ class OOTTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa: F
         # summary logging.  The per-variant tag selection happens later in the
         # new_methods loop where the dtype is known from method_name.
         # ------------------------------------------------------------------
-        all_tags_union: List[str] = []
+        all_tags_union: list[str] = []
         _seen_union: set = set()
         for _e in all_entries_for_name:
             for _t in _e.tags or []:
@@ -602,7 +615,7 @@ class OOTTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa: F
                     all_tags_union.append(_t)
 
         # Collect op-level tags for collection-time summary print ONLY
-        op_tags: List[str] = []
+        op_tags: list[str] = []
         seen_op_tags: set = set()
         for _e in all_entries_for_name:
             for ops_item in _e.edits.ops.include:
@@ -662,7 +675,7 @@ class OOTTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa: F
             ).patch()
 
         # Collect dtype union across all entries for patching
-        op_level_dtypes: Set[torch.dtype] = set()
+        op_level_dtypes: set[torch.dtype] = set()
         if cls.SUPPORTED_OPS_CONFIG:
             from torch.testing._internal.common_device_type import ops as _ops_cls
 
@@ -684,7 +697,7 @@ class OOTTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa: F
             _OOTDtypePatcher(test, op_level_dtypes).patch()
 
         # module-level dtype injection from SUPPORTED_MODULES_CONFIG
-        module_level_dtypes: Set[torch.dtype] = set()
+        module_level_dtypes: set[torch.dtype] = set()
         if cls.SUPPORTED_MODULES_CONFIG:
             from torch.testing._internal.common_modules import modules as _modules_cls
 
@@ -709,7 +722,7 @@ class OOTTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa: F
             _OOTModuleDtypePatcher(test, module_level_dtypes).patch()
 
         # Collect extra dtypes from ALL entries for this test name (union)
-        all_extra_dtypes: Set[torch.dtype] = set()
+        all_extra_dtypes: set[torch.dtype] = set()
         for _e in all_entries_for_name:
             all_extra_dtypes |= _e.edits.dtypes.resolved_include()
 
@@ -721,7 +734,7 @@ class OOTTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa: F
         # precision_overrides/tolerance_overrides are dtype-keyed only (an
         # upstream limitation), so -- like the dtype injection above -- these
         # can only vary per dtype, not per op within a shared test method.
-        include_dtype_precision: Dict[torch.dtype, Precision] = {}
+        include_dtype_precision: dict[torch.dtype, Precision] = {}
         for _e in all_entries_for_name:
             include_dtype_precision.update(_e.edits.dtypes.resolved_include_precision())
 
@@ -755,7 +768,7 @@ class OOTTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa: F
         # ------------------------------------------------------------------
         # Collect CPU move functions from all test entries for this test name.
         # Then apply the CPU move patcher to move tensor arguments to CPU.
-        cpu_move_functions: Set[str] = set()
+        cpu_move_functions: set[str] = set()
         for _e in all_entries_for_name:
             per_test_funcs = _e.edits.functions.resolved_cpu_move_functions()
             if per_test_funcs:
@@ -763,7 +776,7 @@ class OOTTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa: F
         if cpu_move_functions:
             _OOTCpuMovePatcher(cls, list(cpu_move_functions), test_name=name).patch()
 
-        _tags_to_write: Dict[str, List[str]] = {}
+        _tags_to_write: dict[str, list[str]] = {}
         for method_name in new_methods:
             # ------------------------------------------------------------------
             # Select the correct TestEntry for THIS variant using dtype matching.
@@ -771,7 +784,7 @@ class OOTTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa: F
             # the entry whose dtype set covers the dtype embedded in method_name
             # (e.g. bfloat16 -> bfloat16 entry, float16 -> float16 entry).
             # ------------------------------------------------------------------
-            resolved_entry: Optional[TestEntry] = None
+            resolved_entry: TestEntry | None = None
             if all_entries_for_name:
                 resolved_entry = _select_entry_by_op_index(method_name)
                 if resolved_entry is None:
@@ -791,7 +804,7 @@ class OOTTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa: F
                         break
 
             # Tags for this specific variant = tags from the resolved entry only
-            variant_tags: List[str] = (
+            variant_tags: list[str] = (
                 list(resolved_entry.tags) if resolved_entry else []
             )
 
@@ -853,7 +866,7 @@ class OOTTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa: F
             # only needs to handle one flat tag list per method.
 
             existing_fn = cls.__dict__.get(method_name)
-            dynamic_tags: List[str] = []
+            dynamic_tags: list[str] = []
             if existing_fn is not None:
                 dynamic_tags = sorted(
                     {

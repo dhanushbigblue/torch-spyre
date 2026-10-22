@@ -11,20 +11,20 @@ import math
 import os
 import warnings
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Optional, Union
 
 import torch
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator  # type: ignore
 
 from .oot_test_constants import (
-    REL_PATH_TOKENS,
-    DTYPE_STR_MAP,
-    MODE_MANDATORY_SUCCESS,
-    MODE_XFAIL,
     _VALID_DTYPE_STRINGS,
     _VALID_INIT_STRATEGIES,
     _VALID_TEST_MODES,
     _VALID_UNLISTED_MODES,
+    DTYPE_STR_MAP,
+    MODE_MANDATORY_SUCCESS,
+    MODE_XFAIL,
+    REL_PATH_TOKENS,
 )
 from .oot_test_matching import parse_dtype
 from .oot_test_utilities import (
@@ -61,11 +61,11 @@ class InputInitArgs(BaseModel):
     """Optional extra arguments for tensor initialization strategies."""
 
     low: int = 0  # randint: lower bound
-    high: Optional[int] = None  # randint: upper bound (required)
-    total: Optional[int] = None  # cumsum_offsets: total (required)
-    fill_value: Optional[float] = None  # full: fill value (required)
-    path: Optional[str] = None  # file: path to .pt / .npy / .safetensors
-    key: Optional[str] = None  # file: key within file (dict/.safetensors)
+    high: int | None = None  # randint: upper bound (required)
+    total: int | None = None  # cumsum_offsets: total (required)
+    fill_value: float | None = None  # full: fill value (required)
+    path: str | None = None  # file: path to .pt / .npy / .safetensors
+    key: str | None = None  # file: key within file (dict/.safetensors)
 
 
 class SpyreTensorLayoutSpec(BaseModel):
@@ -77,8 +77,8 @@ class SpyreTensorLayoutSpec(BaseModel):
     - device_dtype: device data format (e.g., DataFormats.IEEE_FP32) (optional)
     """
 
-    device_size: List[int]
-    stride_map: List[int]
+    device_size: list[int]
+    stride_map: list[int]
     device_dtype: str
 
     @model_validator(mode="after")
@@ -97,12 +97,12 @@ class InputTensorSpec(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    shape: List[int]
+    shape: list[int]
     dtype: str
     device: str = "privateuse1"
     init: str = "rand"
     init_args: InputInitArgs = InputInitArgs()
-    stride: Optional[List[int]] = None
+    stride: list[int] | None = None
     storage_offset: int = 0
     device_layout: Optional["SpyreTensorLayoutSpec"] = None
 
@@ -129,7 +129,7 @@ class InputTensorSpec(BaseModel):
 
     @field_validator("shape")
     @classmethod
-    def validate_shape(cls, v: List[int]) -> List[int]:
+    def validate_shape(cls, v: list[int]) -> list[int]:
         for dim in v:
             if not isinstance(dim, int) or dim < 0:
                 raise ValueError(
@@ -171,7 +171,7 @@ class InputTensorSpec(BaseModel):
     def resolved_dtype(self) -> torch.dtype:
         return _resolve_dtype_str(self.dtype)
 
-    def _effective_dtype(self, dtype_override: Optional[torch.dtype]) -> torch.dtype:
+    def _effective_dtype(self, dtype_override: torch.dtype | None) -> torch.dtype:
         """Resolve the dtype to build this tensor with.
 
         The YAML-declared dtype is honored as-is for non-floating specs (e.g.
@@ -280,7 +280,7 @@ class InputTensorSpec(BaseModel):
         return spyre_tensor
 
     def build(
-        self, *, seed: Optional[int], dtype: Optional[torch.dtype] = None
+        self, *, seed: int | None, dtype: torch.dtype | None = None
     ) -> torch.Tensor:
         """Build and return a CPU tensor according to this spec.
 
@@ -389,7 +389,7 @@ class InputTensorSpec(BaseModel):
         return t
 
     def _build_fallback(
-        self, *, seed: Optional[int], dtype: Optional[torch.dtype] = None
+        self, *, seed: int | None, dtype: torch.dtype | None = None
     ) -> torch.Tensor:
         """Fallback tensor builder when make_tensor is not available."""
         shape = list(self.shape)
@@ -502,7 +502,7 @@ class InputArgTensor(BaseModel):
 class InputArgTensorList(BaseModel):
     """A list of tensors as one positional argument (e.g. torch.cat)."""
 
-    tensor_list: List[InputTensorSpec]
+    tensor_list: list[InputTensorSpec]
 
 
 class InputArgValue(BaseModel):
@@ -548,10 +548,10 @@ class InputArgConfig(BaseModel):
     spec may omit ``config_path`` entirely.
     """
 
-    config_path: Optional[str] = None  # e.g. "transformers.models...GraniteConfig"
-    config_kwargs: Dict[str, Any] = {}
-    model_id: Optional[str] = None  # HF path/dir for AutoConfig.from_pretrained
-    config_overrides: Dict[str, Any] = {}  # applied via setattr after from_pretrained
+    config_path: str | None = None  # e.g. "transformers.models...GraniteConfig"
+    config_kwargs: dict[str, Any] = {}
+    model_id: str | None = None  # HF path/dir for AutoConfig.from_pretrained
+    config_overrides: dict[str, Any] = {}  # applied via setattr after from_pretrained
 
     @model_validator(mode="after")
     def _require_source(self) -> "InputArgConfig":
@@ -588,11 +588,11 @@ class InputArgModule(BaseModel):
     """
 
     module_path: str  # e.g. "transformers.models.granite...GraniteAttention"
-    config_path: Optional[str] = None
-    config_kwargs: Dict[str, Any] = {}
-    model_id: Optional[str] = None  # HF path/dir for AutoConfig.from_pretrained
-    config_overrides: Dict[str, Any] = {}  # applied via setattr after from_pretrained
-    module_kwargs: Dict[str, Any] = {}  # e.g. {"layer_idx": 0}
+    config_path: str | None = None
+    config_kwargs: dict[str, Any] = {}
+    model_id: str | None = None  # HF path/dir for AutoConfig.from_pretrained
+    config_overrides: dict[str, Any] = {}  # applied via setattr after from_pretrained
+    module_kwargs: dict[str, Any] = {}  # e.g. {"layer_idx": 0}
 
     def config_arg(self) -> Optional["InputArgConfig"]:
         """Return the config spec to build the inner module with, if any.
@@ -631,9 +631,9 @@ class InputArgCache(BaseModel):
     layer_idx: int
     key: InputTensorSpec
     value: InputTensorSpec
-    max_cache_len: Optional[int] = None
-    config_path: Optional[str] = None
-    config_kwargs: Dict[str, Any] = {}
+    max_cache_len: int | None = None
+    config_path: str | None = None
+    config_kwargs: dict[str, Any] = {}
 
 
 # Union type for a single element of edits.inputs.args
@@ -784,7 +784,7 @@ def _build_inner_module(arg: "InputArgModule") -> Any:
     return inner_cls(*ctor_args, **arg.module_kwargs)
 
 
-def _dtypes_from_input_arg(arg: "InputArg") -> Set[torch.dtype]:
+def _dtypes_from_input_arg(arg: "InputArg") -> set[torch.dtype]:
     """Return the dtype(s) baked into a single positional arg, if any."""
     if isinstance(arg, InputArgTensor):
         return {arg.tensor.resolved_dtype()}
@@ -793,7 +793,7 @@ def _dtypes_from_input_arg(arg: "InputArg") -> Set[torch.dtype]:
     return set()
 
 
-def _dtypes_from_kwarg_value(v: Any) -> Set[torch.dtype]:
+def _dtypes_from_kwarg_value(v: Any) -> set[torch.dtype]:
     """Return the dtype(s) baked into a raw (unparsed) kwarg value, if any.
 
     Kwarg values are stored as raw dicts until ``resolved_kwargs()`` builds
@@ -808,11 +808,11 @@ def _dtypes_from_kwarg_value(v: Any) -> Set[torch.dtype]:
     return set()
 
 
-def _dtypes_from_inputs_edits(edits: Optional["InputsEdits"]) -> Set[torch.dtype]:
+def _dtypes_from_inputs_edits(edits: Optional["InputsEdits"]) -> set[torch.dtype]:
     """Collect every dtype baked into an InputsEdits' args/kwargs tensor specs."""
     if edits is None:
         return set()
-    dtypes: Set[torch.dtype] = set()
+    dtypes: set[torch.dtype] = set()
     for arg in edits.args:
         dtypes |= _dtypes_from_input_arg(arg)
     for v in edits.kwargs.values():
@@ -820,7 +820,7 @@ def _dtypes_from_inputs_edits(edits: Optional["InputsEdits"]) -> Set[torch.dtype
     return dtypes
 
 
-def _move_to_test_device(obj: Any, test_device: Optional[torch.device]) -> Any:
+def _move_to_test_device(obj: Any, test_device: torch.device | None) -> Any:
     """Move built tensors (or lists of tensors) to the target test device.
 
     Tensor specs are always built on CPU for reproducible seeded random data
@@ -846,8 +846,8 @@ def _move_to_test_device(obj: Any, test_device: Optional[torch.device]) -> Any:
 def _build_cache(
     arg: "InputArgCache",
     *,
-    seed: Optional[int],
-    test_device: Optional[torch.device] = None,
+    seed: int | None,
+    test_device: torch.device | None = None,
 ) -> Any:
     """Reconstruct a KV cache primed with past tokens from an ``InputArgCache``.
 
@@ -919,8 +919,8 @@ class InputsEdits(BaseModel):
     kwargs: keyword arguments passed to the op / module forward
     """
 
-    args: List[InputArg] = []
-    kwargs: Dict[str, Any] = {}
+    args: list[InputArg] = []
+    kwargs: dict[str, Any] = {}
 
     @model_validator(mode="before")
     @classmethod
@@ -936,11 +936,11 @@ class InputsEdits(BaseModel):
     def build_cpu_args(
         self,
         *,
-        seed: Optional[int],
+        seed: int | None,
         op_name: str = "",
-        test_device: Optional[torch.device] = None,
-        dtype: Optional[torch.dtype] = None,
-    ) -> List[Any]:
+        test_device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> list[Any]:
         """Build all positional args on CPU. Delegates to InputTensorSpec.build().
 
         `dtype`, if given, is applied to floating-point tensor specs only (see
@@ -948,7 +948,7 @@ class InputsEdits(BaseModel):
         reflected in the built inputs rather than always using the YAML's
         literal dtype.
         """
-        cpu_args: List[Any] = []
+        cpu_args: list[Any] = []
         for i, arg in enumerate(self.args):
             inp_seed = None if seed is None else seed + i * 1000
 
@@ -1031,9 +1031,9 @@ class InputsEdits(BaseModel):
     def resolved_device_args(
         self,
         *,
-        test_device: Optional[torch.device],
+        test_device: torch.device | None,
         op_name: str = "",
-    ) -> Dict[int, Any]:
+    ) -> dict[int, Any]:
         """Return {arg_index: test_device} for positional device args.
 
         ``torch.to("cuda:0")`` names its destination positionally, so it takes
@@ -1041,7 +1041,7 @@ class InputsEdits(BaseModel):
         kwarg. Only indices holding a device are returned, so callers can overlay
         them onto CPU-built args without disturbing other values.
         """
-        out: Dict[int, Any] = {}
+        out: dict[int, Any] = {}
         if test_device is None or op_name != "torch.to":
             return out
         for i, raw in enumerate(self.args):
@@ -1054,10 +1054,10 @@ class InputsEdits(BaseModel):
     def resolved_kwargs(
         self,
         *,
-        test_device: Optional[torch.device] = None,
-        seed: Optional[int] = None,
-        dtype: Optional[torch.dtype] = None,
-    ) -> Dict[str, Any]:
+        test_device: torch.device | None = None,
+        seed: int | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> dict[str, Any]:
         """Return kwargs with tensor specs built and dtype strings resolved.
 
         `dtype`, if given, is applied to floating-point tensor/tensor_list
@@ -1114,7 +1114,7 @@ class InputsEdits(BaseModel):
             "value",
         }
 
-        out: Dict[str, Any] = {}
+        out: dict[str, Any] = {}
         for i, (k, v) in enumerate(self.kwargs.items()):
             # Build tensor/tensor_list/config/cache/py specs into real objects,
             # mirroring build_cpu_args() for positional args. Use a per-key seed
@@ -1192,15 +1192,15 @@ class InputsEdits(BaseModel):
 class Precision(BaseModel):
     """Precision sub-model for tolerance overrides."""
 
-    atol: Optional[float] = None
-    rtol: Optional[float] = None
+    atol: float | None = None
+    rtol: float | None = None
 
 
 class NamedItem(BaseModel):
     """A named item in an include/exclude list."""
 
     name: str
-    description: Optional[str] = None
+    description: str | None = None
 
 
 class ModulesNamedItem(BaseModel):
@@ -1212,8 +1212,8 @@ class ModulesNamedItem(BaseModel):
     """
 
     name: str
-    module_path: Optional[str] = None  # Full import path (e.g., "torch.nn.Linear")
-    description: Optional[str] = None
+    module_path: str | None = None  # Full import path (e.g., "torch.nn.Linear")
+    description: str | None = None
 
     # When true, a device-side instance of this module has its parameters and
     # buffers REALLOCATED with the device layout the production path uses,
@@ -1233,8 +1233,8 @@ class ModulesNamedItem(BaseModel):
     apply_device_layout: bool = False
 
     sample_inputs_func: InputsEdits = InputsEdits()  # Legacy: forward inputs only
-    constructor_inputs: Optional[InputsEdits] = None  # New: explicit constructor inputs
-    forward_inputs: Optional[Union[InputsEdits, List[InputsEdits]]] = (
+    constructor_inputs: InputsEdits | None = None  # New: explicit constructor inputs
+    forward_inputs: InputsEdits | list[InputsEdits] | None = (
         None  # New: explicit forward inputs (single or list)
     )
 
@@ -1256,7 +1256,7 @@ class ModulesNamedItem(BaseModel):
                 values["forward_inputs"] = parsed_list
         return values
 
-    def resolved_input_dtypes(self) -> Set[torch.dtype]:
+    def resolved_input_dtypes(self) -> set[torch.dtype]:
         """Return the floating-point dtype(s) baked into this module's tensor specs.
 
         edits.modules.include is additive: this is the sole source of
@@ -1271,7 +1271,7 @@ class ModulesNamedItem(BaseModel):
         never recast per dtype variant (see InputTensorSpec._effective_dtype)
         and have no bearing on which dtype variants should be generated.
         """
-        dtypes: Set[torch.dtype] = set()
+        dtypes: set[torch.dtype] = set()
         dtypes |= _dtypes_from_inputs_edits(self.constructor_inputs)
 
         forward_spec = self.forward_inputs or self.sample_inputs_func
@@ -1286,11 +1286,11 @@ class ModulesNamedItem(BaseModel):
     def build_module_input(
         self,
         *,
-        seed: Optional[int],
-        test_device: Optional[torch.device],
+        seed: int | None,
+        test_device: torch.device | None,
         FunctionInput,
         ModuleInput,
-        dtype: Optional[torch.dtype] = None,
+        dtype: torch.dtype | None = None,
     ) -> Any:
         """Build a ModuleInput from the config inputs.
 
@@ -1353,15 +1353,15 @@ class OpsNamedItem(BaseModel):
     """A named item in an include list in an op"""
 
     name: str
-    description: Optional[str] = None
-    tags: List[str] = []  # optional per-op tags
+    description: str | None = None
+    tags: list[str] = []  # optional per-op tags
     sample_inputs_func: InputsEdits = InputsEdits()
 
     def build_sample_input(
         self,
         *,
-        seed: Optional[int],
-        test_device: Optional[torch.device],
+        seed: int | None,
+        test_device: torch.device | None,
         SampleInput,
     ) -> Any:
         """Build a SampleInput from the config inputs.
@@ -1386,44 +1386,44 @@ class DtypeNamedItem(BaseModel):
     """A dtype item with optional precision override."""
 
     name: str
-    description: Optional[str] = None
-    precision: Optional[Precision] = None
+    description: str | None = None
+    precision: Precision | None = None
     force_xfail: bool = False
 
 
 class OpsEdits(BaseModel):
     """Per-test op list overrides."""
 
-    include: List[OpsNamedItem] = []  # inject ops into @ops.op_list
-    exclude: List[NamedItem] = []  # remove ops from @ops.op_list
+    include: list[OpsNamedItem] = []  # inject ops into @ops.op_list
+    exclude: list[NamedItem] = []  # remove ops from @ops.op_list
 
-    def included_op_names(self) -> Set[str]:
+    def included_op_names(self) -> set[str]:
         return {item.name for item in self.include}
 
-    def excluded_op_names(self) -> Set[str]:
+    def excluded_op_names(self) -> set[str]:
         return {item.name for item in self.exclude}
 
 
 class ModulesEdits(BaseModel):
     """Per-test module list overrides."""
 
-    include: List[
+    include: list[
         ModulesNamedItem
     ] = []  # inject modules into @modules.module_info_list
-    exclude: List[NamedItem] = []  # remove modules from @modules.module_info_list
+    exclude: list[NamedItem] = []  # remove modules from @modules.module_info_list
 
-    def included_module_names(self) -> Set[str]:
+    def included_module_names(self) -> set[str]:
         return {item.name for item in self.include}
 
-    def excluded_module_names(self) -> Set[str]:
+    def excluded_module_names(self) -> set[str]:
         return {item.name for item in self.exclude}
 
 
 class DtypesEdits(BaseModel):
     """Per-test dtype overrides."""
 
-    include: List[DtypeNamedItem] = []  # inject dtypes into @ops.allowed_dtypes
-    exclude: List[NamedItem] = []  # remove dtype variants for this test
+    include: list[DtypeNamedItem] = []  # inject dtypes into @ops.allowed_dtypes
+    exclude: list[NamedItem] = []  # remove dtype variants for this test
 
     @field_validator("include", "exclude", mode="before")
     @classmethod
@@ -1437,19 +1437,19 @@ class DtypesEdits(BaseModel):
                 )
         return v
 
-    def included_dtype_names(self) -> Set[str]:
+    def included_dtype_names(self) -> set[str]:
         return {item.name for item in self.include}
 
-    def excluded_dtype_names(self) -> Set[str]:
+    def excluded_dtype_names(self) -> set[str]:
         return {item.name for item in self.exclude}
 
-    def resolved_include(self) -> Set[torch.dtype]:
+    def resolved_include(self) -> set[torch.dtype]:
         return {parse_dtype(item.name) for item in self.include}
 
-    def resolved_exclude(self) -> Set[torch.dtype]:
+    def resolved_exclude(self) -> set[torch.dtype]:
         return {parse_dtype(item.name) for item in self.exclude}
 
-    def resolved_include_precision(self) -> Dict[torch.dtype, Precision]:
+    def resolved_include_precision(self) -> dict[torch.dtype, Precision]:
         """Return {dtype -> Precision} for included dtypes that have precision overrides."""
         return {
             parse_dtype(item.name): item.precision
@@ -1462,7 +1462,7 @@ class FunctionItem(BaseModel):
     """A single function entry for function modification."""
 
     name: str  # Method name (e.g., "assertEqual")
-    description: Optional[str] = None  # Optional description
+    description: str | None = None  # Optional description
 
 
 class FunctionsEdits(BaseModel):
@@ -1473,9 +1473,9 @@ class FunctionsEdits(BaseModel):
     Extensible for future functionality.
     """
 
-    cpu_move: List[FunctionItem] = []
+    cpu_move: list[FunctionItem] = []
 
-    def resolved_cpu_move_functions(self) -> List[str]:
+    def resolved_cpu_move_functions(self) -> list[str]:
         """Return list of function names to patch with CPU move."""
         return [item.name for item in self.cpu_move]
 
@@ -1492,16 +1492,16 @@ class TestEntry(BaseModel):
 
     __test__ = False  # prevent pytest from collecting this as a test class
 
-    names: List[str]
+    names: list[str]
     mode: str = MODE_MANDATORY_SUCCESS
-    tags: List[str] = []
-    labels: List[str] = []
+    tags: list[str] = []
+    labels: list[str] = []
     no_grad: bool = False
     edits: TestEdits = TestEdits()
 
     @field_validator("names", mode="before")
     @classmethod
-    def validate_name(cls, v) -> List[str]:
+    def validate_name(cls, v) -> list[str]:
         if isinstance(v, str):
             v = [v]
         for item in v:
@@ -1533,9 +1533,9 @@ class TestEntry(BaseModel):
             )
         return v
 
-    def name_pairs(self) -> List[tuple]:
+    def name_pairs(self) -> list[tuple]:
         """Return [(class_name_or_None, method_name), ...] for all entries in names."""
-        result: List[tuple] = []
+        result: list[tuple] = []
         for n in self.names:
             parts = n.split("::")
             if len(parts) == 1:
@@ -1544,13 +1544,13 @@ class TestEntry(BaseModel):
                 result.append((parts[0], parts[1]))
         return result
 
-    def method_names(self) -> List[str]:
+    def method_names(self) -> list[str]:
         """Return just the method_name part of each entry."""
         return [n.split("::")[-1] for n in self.names]
 
-    def class_names(self) -> List[Optional[str]]:
+    def class_names(self) -> list[str | None]:
         """Return just the class_name part of each entry, or None for plain method names."""
-        result: List[Optional[str]] = []
+        result: list[str | None] = []
         for n in self.names:
             parts = n.split("::")
             result.append(parts[0] if len(parts) == 2 else None)
@@ -1569,10 +1569,8 @@ class FileEntry(BaseModel):
     # once files from different configs are combined). See
     # OOTTestBase._load_test_suite_config(), which prefers this over
     # test_suite_config.labels when non-empty.
-    labels: List[str] = []
-    # Merge-provenance only, like labels above, for exclude_platforms.
-    exclude_platforms: List[str] = []
-    tests: List[TestEntry] = []
+    labels: list[str] = []
+    tests: list[TestEntry] = []
 
     @field_validator("unlisted_test_mode")
     @classmethod
@@ -1598,7 +1596,7 @@ class FileEntry(BaseModel):
             )
         return v
 
-    def get_test_entry(self, class_name: str, method_name: str) -> Optional[TestEntry]:
+    def get_test_entry(self, class_name: str, method_name: str) -> TestEntry | None:
         """Look up a TestEntry by class and method name, or None if not listed."""
         qualified = f"{class_name}::{method_name}"
         for entry in self.tests:
@@ -1611,7 +1609,7 @@ class SupportedOpDtypeConfig(BaseModel):
     """Model for supported_ops.dtype: name, precision."""
 
     name: str
-    precision: Optional[Precision] = None
+    precision: Precision | None = None
 
     @field_validator("name")
     @classmethod
@@ -1629,19 +1627,19 @@ class SupportedOpConfig(BaseModel):
 
     name: str
     force_xfail: bool = False
-    dtypes: List[SupportedOpDtypeConfig] = []
+    dtypes: list[SupportedOpDtypeConfig] = []
 
-    def resolved_dtype_names(self) -> Optional[Set[str]]:
+    def resolved_dtype_names(self) -> set[str] | None:
         if not self.dtypes:
             return None
         return {d.name for d in self.dtypes}
 
-    def resolved_dtypes(self) -> Optional[Set[torch.dtype]]:
+    def resolved_dtypes(self) -> set[torch.dtype] | None:
         if not self.dtypes:
             return None
         return {d.resolved_dtype() for d in self.dtypes}
 
-    def get_precision(self, dtype_name: str) -> Optional[Precision]:
+    def get_precision(self, dtype_name: str) -> Precision | None:
         """Return Precision for a specific dtype, or None if not set."""
         for d in self.dtypes:
             if d.name == dtype_name and d.precision is not None:
@@ -1657,16 +1655,16 @@ class SupportedModuleConfig(BaseModel):
 
     name: str
     force_xfail: bool = False
-    dtypes: List[SupportedOpDtypeConfig] = []
-    constructor_inputs: Optional[InputsEdits] = None  # Inline constructor inputs
-    forward_inputs: Optional[Union[InputsEdits, List[InputsEdits]]] = (
+    dtypes: list[SupportedOpDtypeConfig] = []
+    constructor_inputs: InputsEdits | None = None  # Inline constructor inputs
+    forward_inputs: InputsEdits | list[InputsEdits] | None = (
         None  # Inline forward inputs (single or list)
     )
 
     def get_name(self) -> str:
         return self.name
 
-    def resolved_dtypes(self) -> Optional[Set[torch.dtype]]:
+    def resolved_dtypes(self) -> set[torch.dtype] | None:
         if not self.dtypes:
             return None
         return {d.resolved_dtype() for d in self.dtypes}
@@ -1688,15 +1686,15 @@ class SupportedModuleConfig(BaseModel):
 class InputConfig(BaseModel):
     """Global configuration for test input generation."""
 
-    seed: Optional[int] = None
+    seed: int | None = None
 
 
 class GlobalConfig(BaseModel):
     """Model for global configs: supported_dtypes, supported_ops."""
 
-    supported_dtypes: List[DtypeNamedItem] = []
-    supported_ops: Optional[List[SupportedOpConfig]] = None
-    supported_modules: Optional[List[SupportedModuleConfig]] = None
+    supported_dtypes: list[DtypeNamedItem] = []
+    supported_ops: list[SupportedOpConfig] | None = None
+    supported_modules: list[SupportedModuleConfig] | None = None
     input_config: InputConfig = InputConfig()
 
     @field_validator("supported_dtypes", mode="before")
@@ -1733,7 +1731,7 @@ class GlobalConfig(BaseModel):
                     ]
         return values
 
-    def resolved_supported_dtypes(self) -> Optional[Set[torch.dtype]]:
+    def resolved_supported_dtypes(self) -> set[torch.dtype] | None:
         """Return supported_dtypes as a set, or None if not specified (no filtering)."""
         if not self.supported_dtypes:
             return None
@@ -1741,7 +1739,7 @@ class GlobalConfig(BaseModel):
 
     def resolved_supported_dtypes_precision(
         self,
-    ) -> Dict[torch.dtype, Precision]:
+    ) -> dict[torch.dtype, Precision]:
         """Return {dtype -> Precision} for dtypes that have precision overrides."""
         return {
             parse_dtype(item.name): item.precision
@@ -1749,30 +1747,30 @@ class GlobalConfig(BaseModel):
             if item.precision is not None
         }
 
-    def resolved_supported_dtypes_force_xfail(self) -> Set[torch.dtype]:
+    def resolved_supported_dtypes_force_xfail(self) -> set[torch.dtype]:
         """Return the set of dtypes that have force_xfail: true."""
         return {
             parse_dtype(item.name) for item in self.supported_dtypes if item.force_xfail
         }
 
-    def resolved_supported_ops(self) -> Optional[Set[str]]:
+    def resolved_supported_ops(self) -> set[str] | None:
         if self.supported_ops is None:
             return None
         return {op.name for op in self.supported_ops}
 
-    def resolved_supported_modules(self) -> Optional[Set[str]]:
+    def resolved_supported_modules(self) -> set[str] | None:
         if self.supported_modules is None:
             return None
         return {m.name for m in self.supported_modules}
 
-    def resolved_supported_ops_config(self) -> Optional[Dict[str, SupportedOpConfig]]:
+    def resolved_supported_ops_config(self) -> dict[str, SupportedOpConfig] | None:
         if self.supported_ops is None:
             return None
         return {op.name: op for op in self.supported_ops}
 
     def resolved_supported_modules_config(
         self,
-    ) -> Optional[Dict[str, SupportedModuleConfig]]:
+    ) -> dict[str, SupportedModuleConfig] | None:
         if self.supported_modules is None:
             return None
         return {m.name: m for m in self.supported_modules}
@@ -1781,10 +1779,9 @@ class GlobalConfig(BaseModel):
 class TestsBlock(BaseModel):
     """Holds the inner YAML keys: files, global, and suite-level metadata."""
 
-    files: List[FileEntry]
+    files: list[FileEntry]
     global_config: GlobalConfig = GlobalConfig()
-    labels: List[str] = []
-    exclude_platforms: List[str] = []
+    labels: list[str] = []
 
     @model_validator(mode="before")
     @classmethod
@@ -1800,7 +1797,7 @@ class OOTTestConfig(BaseModel):
     test_suite_config: TestsBlock
 
     @property
-    def files(self) -> List[FileEntry]:
+    def files(self) -> list[FileEntry]:
         return self.test_suite_config.files
 
     @property
@@ -1808,5 +1805,5 @@ class OOTTestConfig(BaseModel):
         return self.test_suite_config.global_config
 
     @property
-    def seed(self) -> Optional[int]:
+    def seed(self) -> int | None:
         return self.test_suite_config.global_config.input_config.seed

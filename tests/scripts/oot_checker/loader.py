@@ -77,9 +77,9 @@ def load_labels(config_files: list[Path]) -> dict[Path, list | None]:
     return result
 
 
-def load_excluded_platforms(config_files: list[Path]) -> dict[Path, list]:
+def load_entry_tags(config_files: list[Path]) -> dict[Path, list[str]]:
     """
-    Read test_suite_config.exclude_platforms from each config file.
+    Collect all tag strings from every test entry block across all config files.
 
     Parameters
     ----------
@@ -88,19 +88,23 @@ def load_excluded_platforms(config_files: list[Path]) -> dict[Path, list]:
 
     Returns
     -------
-    dict[Path, list]
-        Maps each config file to its declared exclude_platforms list
-        (empty list when absent).
+    dict[Path, list[str]]
+        Maps each config file to the flat list of all tag strings found in
+        test_suite_config.files[*].tests[*].tags (empty list when absent).
     """
-    result: dict[Path, list] = {}
+    result: dict[Path, list[str]] = {}
     for cf in config_files:
         try:
             cfg = yaml.safe_load(cf.read_text()) or {}
         except Exception as e:
             _warn(f"Cannot load {cf}: {e}")
             continue
-        tsc = cfg.get("test_suite_config") or {}
-        result[cf] = list(tsc.get("exclude_platforms") or [])
+        tags: list[str] = []
+        for file_entry in cfg.get("test_suite_config", {}).get("files", []):
+            for block in file_entry.get("tests", []):
+                for tag in block.get("tags", []):
+                    tags.append(str(tag))
+        result[cf] = tags
     return result
 
 

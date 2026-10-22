@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import ast
 import json
-import platform as _platform
 import os
+import platform as _platform
 import sys
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any
+
 import regex as re
 import torch
 
@@ -22,7 +24,6 @@ from .oot_test_constants import (
     REL_PATH_TOKENS,
 )
 from .oot_test_matching import parse_dtype
-
 
 # ---------------------------------------------------------------------------
 # Optional YAML import
@@ -124,7 +125,7 @@ _PY_ALLOWED_NODES = {
     ast.USub,
     ast.UAdd,
 }
-_PY_ALLOWED_NAMES: Dict[str, Any] = {
+_PY_ALLOWED_NAMES: dict[str, Any] = {
     "None": None,
     "Ellipsis": Ellipsis,
     "slice": slice,
@@ -230,8 +231,8 @@ def _is_regex_pattern(name: str) -> bool:
 
 
 def _regex_entries_for_name(
-    name: str, regex_entries: List[Tuple[str, Any]]
-) -> List[Any]:
+    name: str, regex_entries: list[tuple[str, Any]]
+) -> list[Any]:
     """Return all TestEntry objects whose stored regex pattern matches *name*.
 
     *name* is the base method name as seen by ``instantiate_test`` (e.g.
@@ -254,7 +255,7 @@ def _regex_entries_for_name(
 
 def _build_test_entry_map(
     file_entry: Any,
-) -> Tuple[Dict[str, List[Any]], List[Tuple[str, Any]]]:
+) -> tuple[dict[str, list[Any]], list[tuple[str, Any]]]:
     """Build exact-name map and regex list from file_entry.tests.
 
     A single TestEntry can cover multiple test ids via name: [list].
@@ -286,8 +287,8 @@ def _build_test_entry_map(
 
         cls.TEST_ENTRIES, cls.REGEX_ENTRIES = _build_test_entry_map(file_entry)
     """
-    exact_map: Dict[str, List[Any]] = {}
-    regex_entries: List[Tuple[str, Any]] = []
+    exact_map: dict[str, list[Any]] = {}
+    regex_entries: list[tuple[str, Any]] = []
 
     for entry in file_entry.tests:
         for method_name in entry.method_names():
@@ -301,8 +302,8 @@ def _build_test_entry_map(
 
 def _entry_dtype_set(
     entry: Any,
-    global_supported_dtypes: Optional[Set[torch.dtype]],
-) -> Optional[Set[torch.dtype]]:
+    global_supported_dtypes: set[torch.dtype] | None,
+) -> set[torch.dtype] | None:
     """Return the effective dtype set for *entry*.
 
     Priority (highest to lowest):
@@ -326,7 +327,7 @@ _MODEL_OPS_VARIANT_RE = re.compile(
 )
 
 
-def _select_entry_by_op_index(method_name: str) -> Optional[Any]:
+def _select_entry_by_op_index(method_name: str) -> Any | None:
     """Resolve the TestEntry for a test_model_ops_db variant via the
     authoritative unique_name mapping; returns None to let callers fall
     back to the dtype heuristic."""
@@ -371,9 +372,9 @@ def _filter_entries_by_platform(entries: Sequence[Any]) -> List[Any]:
 
 
 def _select_entry_for_variant(
-    entries: List[Any],
+    entries: list[Any],
     method_name: str,
-    global_supported_dtypes: Optional[Set[torch.dtype]],
+    global_supported_dtypes: set[torch.dtype] | None,
 ) -> Any:
     """Pick the best-matching TestEntry for a concrete variant method name.
 
@@ -404,7 +405,7 @@ def _select_entry_for_variant(
         return entries[0]
 
     dtype_str = extract_dtype_from_name(method_name)
-    variant_dtype: Optional[torch.dtype] = None
+    variant_dtype: torch.dtype | None = None
     if dtype_str:
         try:
             variant_dtype = parse_dtype(dtype_str)
@@ -430,7 +431,7 @@ def _select_entry_for_variant(
 
 def _extract_op_name_from_method(
     method_name: str, base_test_name: str, oot_device_type: str
-) -> Optional[str]:
+) -> str | None:
     """Extract the op name from a parametrized method name.
 
     method_name: test_scalar_support_add_<device>_float16
@@ -463,21 +464,21 @@ Utility for printing per-test tags at run time alongside PASS/FAIL output.
 """
 
 # To store method_name -> full tag list set during test execution
-_RUNTIME_TAGS: Dict[str, List[str]] = {}
+_RUNTIME_TAGS: dict[str, list[str]] = {}
 # To store method_name -> formatted shape/stride string set during test execution
-_RUNTIME_SHAPES: Dict[str, str] = {}
+_RUNTIME_SHAPES: dict[str, str] = {}
 # method_name -> JUnit properties the test recorded; conftest attaches them to the item
-_RUNTIME_PROPS: Dict[str, Dict[str, str]] = {}
+_RUNTIME_PROPS: dict[str, dict[str, str]] = {}
 
 
-def record_properties(test_instance: Any, props: Dict[str, Any]) -> None:
+def record_properties(test_instance: Any, props: dict[str, Any]) -> None:
     """Record JUnit properties for the running test (non-str values as JSON)."""
     recorded = _RUNTIME_PROPS.setdefault(test_instance._testMethodName, {})
     for name, value in props.items():
         recorded[name] = value if isinstance(value, str) else json.dumps(value)
 
 
-def _input_args_record(input_args: List[Any]) -> List[Dict[str, Any]]:
+def _input_args_record(input_args: list[Any]) -> list[dict[str, Any]]:
     """The facts _format_input_args_shapes prints, as JSON-ready dicts."""
     from .oot_test_config_models import (
         InputArgPy,
@@ -486,10 +487,10 @@ def _input_args_record(input_args: List[Any]) -> List[Dict[str, Any]]:
         InputArgValue,
     )
 
-    def _tensor(spec: Any) -> Dict[str, Any]:
+    def _tensor(spec: Any) -> dict[str, Any]:
         return {"shape": spec.shape, "dtype": spec.dtype, "stride": spec.stride}
 
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     for arg in input_args or []:
         if isinstance(arg, InputArgTensor):
             out.append({"tensor": _tensor(arg.tensor)})
@@ -504,7 +505,7 @@ def _input_args_record(input_args: List[Any]) -> List[Dict[str, Any]]:
     return out
 
 
-def _format_input_args_shapes(input_args: List[Any]) -> str:
+def _format_input_args_shapes(input_args: list[Any]) -> str:
     """Return a human-readable string of shape/stride info for each InputArg.
 
     Handles InputArgTensor, InputArgTensorList, InputArgConfig, InputArgValue,
@@ -521,16 +522,16 @@ def _format_input_args_shapes(input_args: List[Any]) -> str:
 
     try:
         from .oot_test_config_models import (
+            InputArgConfig,
+            InputArgPy,
             InputArgTensor,
             InputArgTensorList,
-            InputArgConfig,
             InputArgValue,
-            InputArgPy,
         )
     except ImportError:
         return ""
 
-    lines: List[str] = []
+    lines: list[str] = []
     for i, arg in enumerate(input_args):
         if isinstance(arg, InputArgTensor):
             spec = arg.tensor
@@ -565,8 +566,8 @@ def _format_input_args_shapes(input_args: List[Any]) -> str:
 
 def print_test_tags_oot(
     test_instance: Any,
-    op_tags: List[str] = [],
-    input_args: Optional[List[Any]] = None,
+    op_tags: list[str] = [],
+    input_args: list[Any] | None = None,
 ) -> None:
     """Print [TAGS = ...] and optional per-arg shape/stride info at run time.
 
@@ -617,8 +618,8 @@ def print_test_tags_oot(
 
 
 def _deep_merge_globals(
-    base: Dict[str, Any], incoming: Dict[str, Any]
-) -> Dict[str, Any]:
+    base: dict[str, Any], incoming: dict[str, Any]
+) -> dict[str, Any]:
     """Merge two `global:` dicts according to the superset rules.
 
     Rules (per key):
@@ -638,7 +639,7 @@ def _deep_merge_globals(
     an op with the same name but different sub-fields is appended as a new
     entry (superset semantics).
     """
-    result: Dict[str, Any] = dict(base)
+    result: dict[str, Any] = dict(base)
 
     for key, incoming_val in incoming.items():
         if key not in result:
@@ -676,7 +677,7 @@ def _deep_merge_globals(
     return result
 
 
-def _merge_file_entries(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _merge_file_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Merge per-file entries from all configs into a deduplicated list.
 
     Two entries with the same ``path`` value are merged: their ``tests``
@@ -692,7 +693,7 @@ def _merge_file_entries(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     - Entries with distinct paths are appended in the order they appear.
     """
     # Preserve insertion order; key = resolved path string.
-    merged: Dict[str, Dict[str, Any]] = {}
+    merged: dict[str, dict[str, Any]] = {}
 
     for entry in entries:
         path = entry.get("path", "")
@@ -703,7 +704,6 @@ def _merge_file_entries(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "unlisted_test_mode": entry.get("unlisted_test_mode", "xfail"),
                 "tests": list(entry.get("tests") or []),
                 "labels": list(entry.get("labels") or []),
-                "exclude_platforms": list(entry.get("exclude_platforms") or []),
             }
         else:
             existing = merged[path]
@@ -724,10 +724,6 @@ def _merge_file_entries(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             for lbl in entry.get("labels") or []:
                 if lbl not in existing["labels"]:
                     existing["labels"].append(lbl)
-
-            for plat in entry.get("exclude_platforms") or []:
-                if plat not in existing["exclude_platforms"]:
-                    existing["exclude_platforms"].append(plat)
 
             for test_block in entry.get("tests") or []:
                 block_names = frozenset(
@@ -763,7 +759,7 @@ def _merge_file_entries(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def merge_yaml_configs(
     config_paths: Sequence[str | os.PathLike],
     *,
-    output_dir: Optional[str | os.PathLike] = None,
+    output_dir: str | os.PathLike | None = None,
     prefix: str = "_oot_merged_config_",
     suffix: str = ".yaml",
 ) -> str:
@@ -817,7 +813,7 @@ def merge_yaml_configs(
     # ------------------------------------------------------------------
     # Multi-config merge
     # ------------------------------------------------------------------
-    loaded: List[Dict[str, Any]] = []
+    loaded: list[dict[str, Any]] = []
     for p in paths:
         data = yaml.safe_load(p.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
@@ -838,27 +834,25 @@ def merge_yaml_configs(
     # labels field that could represent per-file provenance once files from
     # different configs are combined, so this is how a file's origin labels
     # (e.g. "integration") survive the merge -- see FileEntry.labels.
-    all_file_entries: List[Dict[str, Any]] = []
+    all_file_entries: list[dict[str, Any]] = []
     for suite in suites:
         suite_labels = suite.get("labels") or []
-        suite_excluded_platforms = suite.get("exclude_platforms") or []
         for f in suite.get("files") or []:
             f = dict(f)
             f["labels"] = list(suite_labels)
-            f["exclude_platforms"] = list(suite_excluded_platforms)
             all_file_entries.append(f)
 
     merged_files = _merge_file_entries(all_file_entries)
 
     # ---- Merge `global` sections --------------------------------------
-    merged_global: Dict[str, Any] = {}
+    merged_global: dict[str, Any] = {}
     for suite in suites:
         g = suite.get("global")
         if isinstance(g, dict):
             merged_global = _deep_merge_globals(merged_global, g)
 
     # ---- Assemble final document --------------------------------------
-    merged_doc: Dict[str, Any] = {
+    merged_doc: dict[str, Any] = {
         "test_suite_config": {
             "files": merged_files,
         }

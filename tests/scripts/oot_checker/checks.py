@@ -11,9 +11,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .display import bold, cyan, green, red, yellow
 from .models import PatternEntry
-from .display import red, yellow, green, cyan, bold
-
 
 # -----------------------
 # CHECK 0: Missing labels
@@ -71,55 +70,64 @@ def check_missing_labels(labels_by_file: dict[Path, list | None]) -> int:
 
 
 # ---------------------------
-# CHECK 0b: Invalid platforms
+# CHECK 0b: Invalid exclude__plat_* tags
 # ---------------------------
 
 # Values platform.machine() is known to return across this project's CI/Jenkins
-# fleet. Keep in sync with filter_configs.py's module docstring.
+# fleet. Keep in sync with _OOT_PLATFORM_ARCH in oot_test_utilities.py.
 KNOWN_PLATFORMS = {"x86_64", "ppc64le", "s390x", "aarch64"}
 
 
-def check_invalid_platforms(excluded_by_file: dict[Path, list]) -> int:
+def check_invalid_exclude_plat_tags(tags_by_file: dict[Path, list[str]]) -> int:
     """
-    Verify every test_suite_config.exclude_platforms value is a platform.machine()
-    string this project actually runs on.
+    Verify every exclude__plat_<arch> tag suffix is a platform.machine() string
+    this project actually runs on.
 
-    A typo'd value (e.g. "ppc64" or "power" instead of "ppc64le") silently never
-    matches platform.machine() -- the config quietly keeps running on the very
-    architecture it meant to exclude. That's a correctness bug, not a style nit,
-    so it's a hard error here, same severity as check_missing_labels.
+    A typo'd suffix (e.g. "exclude__plat_ppc64" instead of "exclude__plat_ppc64le")
+    silently never matches _OOT_PLATFORM_ARCH -- the test quietly keeps running on
+    the architecture it meant to exclude. That's a correctness bug, so it's a hard
+    error here, same severity as check_missing_labels.
 
     Parameters
     ----------
-    excluded_by_file : dict[Path, list]
-        Output of loader.load_excluded_platforms().
+    tags_by_file : dict[Path, list[str]]
+        Output of loader.load_entry_tags(). Maps each config file to the flat
+        list of all tag strings across all its test entries.
 
     Returns
     -------
     int
-        Number of config files with at least one unrecognized platform value.
+        Number of config files with at least one unrecognized exclude__plat_* suffix.
     """
+    PREFIX = "exclude__plat_"
     bad: dict[Path, list[str]] = {}
-    for path, platforms in excluded_by_file.items():
+    for path, tags in tags_by_file.items():
         unknown = sorted(
-            {p for p in platforms if str(p).lower() not in KNOWN_PLATFORMS}
+            {
+                t
+                for t in tags
+                if t.lower().startswith(PREFIX)
+                and t[len(PREFIX) :].lower() not in KNOWN_PLATFORMS
+            }
         )
         if unknown:
             bad[path] = unknown
 
     if not bad:
-        print(green("  [platforms] All exclude_platforms values recognized.\n"))
+        print(green("  [platforms] All exclude__plat_* tag suffixes recognized.\n"))
         return 0
 
     print(
         red(
             f"  [platforms] {len(bad)} config file(s) with an unrecognized "
-            f"exclude_platforms value:\n"
+            f"exclude__plat_* tag suffix:\n"
         )
     )
     for path in sorted(bad, key=str):
         print(f"    {red('INVALID')}  {path}: {bad[path]}")
-        print(f"          known values: {sorted(KNOWN_PLATFORMS)}")
+        print(
+            f"          known suffixes: {sorted('exclude__plat_' + p for p in KNOWN_PLATFORMS)}"
+        )
     print()
     return len(bad)
 
