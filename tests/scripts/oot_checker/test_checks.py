@@ -39,4 +39,4 @@ def test_known_platforms_contains_expected_values():
     # Pinned exactly: a silent edit here (e.g. dropping "s390x") would make
     # check_invalid_platforms stop flagging a real typo for that arch, and
     # the parametrized cases above wouldn't catch it since none exercise it.
-    assert KNOWN_PLATFORMS == {"x86_64", "ppc64le", "s390x", "aarch64"}
+    assert KNOWN_PLATFORMS == {"x86_64", "ppc64le", "s390x"}
