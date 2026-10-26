@@ -26,7 +26,7 @@ from oot_checker.checks import KNOWN_PLATFORMS, check_invalid_platforms
     [
         (["ppc64le"], 0),  # known value
         ([], 0),  # nothing declared
-        (["PPC64LE"], 0),  # known value, mixed case
+        (["PPC64LE"], 1),  # wrong case: runtime match is exact, so it never fires
         (["ppc64"], 1),  # typo
         (["power"], 1),  # typo
     ],

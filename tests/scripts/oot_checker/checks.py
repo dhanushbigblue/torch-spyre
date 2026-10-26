@@ -102,9 +102,9 @@ def check_invalid_platforms(excluded_by_file: dict[Path, list]) -> int:
     """
     bad: dict[Path, list[str]] = {}
     for path, platforms in excluded_by_file.items():
-        unknown = sorted(
-            {p for p in platforms if str(p).lower() not in KNOWN_PLATFORMS}
-        )
+        # Case-sensitive on purpose: the runtime matcher (_platform_excluded)
+        # compares exactly against platform.machine(), so "PPC64LE" never matches.
+        unknown = sorted({p for p in platforms if str(p) not in KNOWN_PLATFORMS})
         if unknown:
             bad[path] = unknown
 
